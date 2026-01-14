@@ -2,33 +2,39 @@ name: Build & Push Mineru Image (amd64 only)
 
 on:
   push:
-    branches:
-      - main
-    tags:
-      - 'v*'          # 當你 git tag v1.0.0 並 push 時也觸發
-  workflow_dispatch:  # 允許手動觸發測試
+    branches: [main]
+    tags: ['v*']          # 正确嵌套在 push 下
+  workflow_dispatch:      # 手动触发
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    environment: docker-prod          # 保持原樣，注入你的 secrets
+    environment: docker-prod
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # # 先釋放空間（強烈推薦，防止偶爾還是爆掉）
-      # - name: Free up disk space
-      #   run: |
-      #     sudo rm -rf /opt/hostedtoolcache/* || true
-      #     sudo rm -rf /usr/share/dotnet || true
-      #     sudo rm -rf /usr/local/lib/android || true
-      #     sudo rm -rf /usr/local/share/boost || true
-      #     docker system prune -af --volumes || true
-      #     df -h
-      #     du -sh /* | sort -hr | head -n 10
+      # 修正参数：使用 remove_ 前缀（endersonmenezes/free-disk-space@v3 标准）
+      - name: Free up disk space
+        uses: endersonmenezes/free-disk-space@v3
+        with:
+          remove_android: true
+          remove_dotnet: true
+          remove_haskell: true
+          remove_tool_cache: true
+          rm_cmd: "rmz"                  # 推荐：更快删除
+          rmz_version: "3.1.1"           # rmz 必须指定版本
+          # 可选额外清理（如果需要更激进）
+          # remove_packages: "azure-cli google-cloud-cli firefox google-chrome-stable"
+          # remove_folders: "/usr/share/swift /usr/local/share/powershell"
 
-      # 登入私有 registry
+      # Debug: 查看清理后空间（强烈推荐保留）
+      - name: Check disk space after cleanup
+        run: |
+          df -h
+          du -sh /* | sort -hr | head -n 15
+
       - name: Login to Private Registry
         uses: docker/login-action@v3
         with:
@@ -36,34 +42,28 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # 只需 Buildx（QEMU 可移除）
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 生成標籤（保持原邏輯：時間戳 + latest + tag）
       - name: Generate tags
         id: tags
         run: |
           CURRENT_TIME=$(date +%Y-%m-%d-%H)
-          TAGS="docker.langcore.net/misaka-self-use/mineru:$CURRENT_TIME"
-          TAGS="$TAGS,docker.langcore.net/misaka-self-use/mineru:latest"
-
+          TAGS="docker.langcore.net/misaka-self-use/mineru:$CURRENT_TIME,docker.langcore.net/misaka-self-use/mineru:latest"
           if [[ $GITHUB_REF == refs/tags/* ]]; then
             TAG_NAME=${GITHUB_REF#refs/tags/}
             TAGS="$TAGS,docker.langcore.net/misaka-self-use/mineru:$TAG_NAME"
           fi
-
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
-      # 構建 + 推送（改成只 amd64）
       - name: Build and push amd64 image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64          # ← 只建 x86_64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          no-cache: true                 # 首次测试防旧 cache 占空间，成功后可移除
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # load: false  # 默認不需要本地 load
