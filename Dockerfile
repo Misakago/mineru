@@ -1,15 +1,9 @@
-# Use the official vllm image for gpu with Ampere、Ada Lovelace、Hopper architecture (8.0 <= Compute Capability <= 9.0)
-# Compute Capability version query (https://developer.nvidia.com/cuda-gpus)
-# only support x86_64 architecture
+# 使用官方 vLLM OpenAI-compatible 鏡像（Ampere/Ada/Hopper GPU 專用）
 FROM vllm/vllm-openai:v0.11.0
 
-# Use the official vllm image for gpu with Volta、Turing、Blackwell architecture (7.0 < Compute Capability < 8.0 or Compute Capability >= 10.0)
-# support x86_64 architecture and ARM(AArch64) architecture
-# FROM vllm/vllm-openai:v0.11.0
-
-# Install libgl for opencv support & Noto fonts for Chinese characters
+# 安裝 libgl (OpenCV 需要) + Noto 字型 (支援中文)
 RUN apt-get update && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
         fonts-noto-core \
         fonts-noto-cjk \
         fontconfig \
@@ -18,12 +12,13 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install mineru latest
-RUN python3 -m pip install -U 'mineru[core]>=2.7.0' --break-system-packages && \
+# 安裝 mineru[core]（使用 --no-cache-dir 避免 pip cache 佔空間）
+RUN python3 -m pip install --no-cache-dir -U 'mineru[core]>=2.7.0' --break-system-packages && \
     python3 -m pip cache purge
 
-# Download models and update the configuration file
-RUN /bin/bash -c "mineru-models-download -s huggingface -m all"
+# 移除模型下載步驟！改成運行時處理
+# 現在 image 不再包含 30-50GB 模型，建置超快、空間夠用
 
-# Set the entry point to activate the virtual environment and run the command line tool
+# 入口點：設定 MINERU_MODEL_SOURCE=local（預設本地），並執行傳入命令
+# 運行時會檢查模型是否存在，不存在才自動下載
 ENTRYPOINT ["/bin/bash", "-c", "export MINERU_MODEL_SOURCE=local && exec \"$@\"", "--"]
