@@ -1,4 +1,4 @@
-name: Build & Push Mineru Image (amd64 only)
+name: Build & Push Mineru Image (amd64 only - no Buildx)
 
 on:
   push:
@@ -15,7 +15,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 空間清理（保持原樣，已證明有效）
+      # 空間清理（保持原樣）
       - name: Free up disk space
         uses: endersonmenezes/free-disk-space@v3
         with:
@@ -26,13 +26,13 @@ jobs:
           rm_cmd: "rmz"
           rmz_version: "3.1.1"
 
-      # 確認空間
-      - name: Check disk space after cleanup
-        run: |
-          df -h
-          du -sh /* 2>/dev/null | sort -hr | head -n 15
+      # # 確認空間
+      # - name: Check disk space after cleanup
+      #   run: |
+      #     df -h
+      #     du -sh /* 2>/dev/null | sort -hr | head -n 15
 
-      # 先明確登入私有 registry
+      # 先登入私有 registry
       - name: Login to Private Registry
         uses: docker/login-action@v3
         with:
@@ -40,7 +40,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # 登入後立即檢查是否成功（強烈建議保留）
+      # 驗證登入（debug 用，可保留或移除）
       - name: Verify Login Success
         run: |
           echo "=== Checking docker login status ==="
@@ -48,35 +48,30 @@ jobs:
           echo ""
           echo "=== Docker config.json content ==="
           cat ~/.docker/config.json || echo "No docker config file"
-          echo ""
-          echo "=== Test pull from registry (optional light test) ==="
-          docker pull --quiet docker.langcore.net/misaka-self-use/mineru:latest || echo "No existing image or pull failed (normal if first push)"
 
-      # Setup Buildx（放在 login 之後）
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # 生成 tags
+      # 生成 tags（時間戳 + latest + tag）
       - name: Generate tags
         id: tags
         run: |
           CURRENT_TIME=$(date +%Y-%m-%d-%H)
-          TAGS="docker.langcore.net/misaka-self-use/mineru:$CURRENT_TIME,docker.langcore.net/misaka-self-use/mineru:latest"
+          TAGS="docker.langcore.net/misaka-self-use/mineru:$CURRENT_TIME docker.langcore.net/misaka-self-use/mineru:latest"
           if [[ $GITHUB_REF == refs/tags/* ]]; then
             TAG_NAME=${GITHUB_REF#refs/tags/}
-            TAGS="$TAGS,docker.langcore.net/misaka-self-use/mineru:$TAG_NAME"
+            TAGS="$TAGS docker.langcore.net/misaka-self-use/mineru:$TAG_NAME"
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
-      # 構建並推送（確保 login 已完成）
-      - name: Build and push amd64 image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.tags.outputs.tags }}
-          no-cache: true                 # 首次測試保持，成功後可改 false 啟用 cache
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      # 使用原生 docker build + push（不依賴 Buildx）
+      - name: Build and push amd64 image (no Buildx)
+        run: |
+          # 建置單平台 amd64 鏡像（--platform linux/amd64 可選，但 ubuntu-latest 默認 amd64）
+          docker build \
+            --no-cache \
+            -t ${{ steps.tags.outputs.tags }} \
+            --file ./Dockerfile \
+            .
+
+          # 推送所有生成的 tags
+          for tag in ${{ steps.tags.outputs.tags }}; do
+            docker push $tag
+          done
