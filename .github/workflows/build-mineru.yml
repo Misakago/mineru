@@ -40,16 +40,16 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # 驗證登入（debug 用，可保留或移除）
-      - name: Verify Login Success
-        run: |
-          echo "=== Checking docker login status ==="
-          docker info --format '{{json .RegistryConfig.IndexConfigs.docker.langcore.net}}' || echo "No registry config found"
-          echo ""
-          echo "=== Docker config.json content ==="
-          cat ~/.docker/config.json || echo "No docker config file"
+      # # 驗證登入（debug 用，可保留或移除）
+      # - name: Verify Login Success
+      #   run: |
+      #     echo "=== Checking docker login status ==="
+      #     docker info --format '{{json .RegistryConfig.IndexConfigs.docker.langcore.net}}' || echo "No registry config found"
+      #     echo ""
+      #     echo "=== Docker config.json content ==="
+      #     cat ~/.docker/config.json || echo "No docker config file"
 
-      # 生成 tags（時間戳 + latest + tag）
+      # 生成 tags（可選保留或合併進上面）
       - name: Generate tags
         id: tags
         run: |
@@ -61,17 +61,23 @@ jobs:
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
-      # 使用原生 docker build + push（不依賴 Buildx）
       - name: Build and push amd64 image (no Buildx)
         run: |
-          # 建置單平台 amd64 鏡像（--platform linux/amd64 可選，但 ubuntu-latest 默認 amd64）
+          MAIN_TAG="docker.langcore.net/misaka-self-use/mineru:latest"
+          
           docker build \
             --no-cache \
-            -t ${{ steps.tags.outputs.tags }} \
+            -t $MAIN_TAG \
             --file ./Dockerfile \
             .
 
-          # 推送所有生成的 tags
+          # 使用 Generate tags 的輸出（如果保留了步驟）
+          for tag in ${{ steps.tags.outputs.tags }}; do
+            if [ "$tag" != "$MAIN_TAG" ]; then
+              docker tag $MAIN_TAG $tag
+            fi
+          done
+
           for tag in ${{ steps.tags.outputs.tags }}; do
             docker push $tag
           done
